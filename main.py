@@ -20,14 +20,15 @@ def parce_vedom():
     sheet = file["ВОР"]
 
     name_work = [cell.value.strip() for cell in sheet['B'][START_ROW_VEDOM - 1:END_ROW_VEDOM] if cell.value]
-    GSN = [cell.value.strip().lower().replace('гэсн', '') for cell in sheet['E'][START_ROW_VEDOM - 1:END_ROW_VEDOM]
+    GSN = [cell.value.strip().lower().replace('гэсн', '').strip() for cell in sheet['E'][START_ROW_VEDOM - 1:END_ROW_VEDOM]
            if cell.value]
+    units_measurement = [cell.value for cell in sheet['C'][START_ROW_VEDOM - 1:END_ROW_VEDOM] if cell.value]
     volume = [cell.value for cell in sheet['D'][START_ROW_VEDOM - 1:END_ROW_VEDOM] if cell.value]
 
     file.close()
 
-    return [{work: {'gsn': gsn, 'volume': vol}}
-            for work, gsn, vol in zip(name_work, GSN, volume)]
+    return [{work: {'gsn': gsn, 'volume': vol, 'units_measurement': un}}
+            for work, gsn, vol, un in zip(name_work, GSN, volume, units_measurement)]
 
 
 def parce_defsmeta(gsn):
@@ -126,12 +127,15 @@ class MSProject:
         self._save_file()
         self._close_file()
 
+
 from openpyxl import Workbook
+
 
 def main():
     project = MSProject(glob.glob(os.path.join(DIRECTORY, '*.mpp'))[0])
-    vedom = parce_vedom()[:6]
+    vedom = parce_vedom()[:]
 
+    count_vedom = len(vedom)
     gsns = []
     for w in vedom:
         for g in w.values():
@@ -152,10 +156,8 @@ def main():
     tasks_obj = project.get_tasks_object()
     list_tasks_obj = list(tasks_obj)
     resources = project.get_resources_name_id()
-    count_vedom = len(vedom)
-    new_vedom = [['Работа', 'ГЭСН', 'Материал', 'Объем']]
+
     for ind, task_vedom in enumerate(vedom, start=1):
-        new_vedom.append([])
         print(f'{ind}/{count_vedom}')
         for task_obj in list_tasks_obj:
             name_task_vedom = list(task_vedom.keys())[0].strip()
@@ -163,15 +165,7 @@ def main():
                 gsn = task_vedom[name_task_vedom]['gsn']
                 gsn_def = resources_defsmeta[gsn]
                 if not list(task_obj.Assignments):
-                    new_vedom[-1].append(name_task_vedom)
-                    new_vedom[-1].append(gsn)
-                    new_vedom[-1].append(None)
-                    new_vedom[-1].append(None)
                     for res_name in gsn_def:
-                        new_vedom.append([None, None])
-                        new_vedom[-1].append(res_name['name'])
-                        new_vedom[-1].append(res_name['consumption'] * task_vedom[name_task_vedom]['volume'])
-                        continue
                         res_id = resources[res_name['name']]
                         res_obj = resources_obj.Item(res_id)
 
@@ -187,20 +181,61 @@ def main():
                         try:
                             task_obj.FixedDuration = True
                             t = task_obj.Assignments.Add(task_obj.ID, res_id)
-                            t.Units = res_name['consumption'] * task_vedom[name_task_vedom]['volume']
+                            if res_name['type'] == 'material':
+                                t.Units = res_name['consumption'] * task_vedom[name_task_vedom]['volume']
+                            else:
+                                t.Work = res_name['consumption'] * task_vedom[name_task_vedom]['volume'] * 60
+
 
                         except Exception as e:
                             print(e)
                     project._save_file()
                     break
+    project.close()
+    print('MSProject сформирован')
+    print('Создание сводного файла по ресурсам')
+    # Создание сводного файла по ресурсам
+    new_vedom = [['Наименование работ', 'Объем', ' ', 'ГЭСН', 'Материалы', 'ед. изм.', 'расход', ' '],
+                 [' ', 'Ед. изм.', 'Кол-во', ' ', ' ', ' ', 'Норм. на един работ', 'Кол-во'],
+                 ]
+
+    summ_vedom = {}
+
+    for ind, task_vedom in enumerate(vedom, start=1):
+        new_vedom.append([])
+        print(f'{ind}/{count_vedom}')
+        name_task_vedom = list(task_vedom.keys())[0].strip()
+        work = task_vedom[name_task_vedom]
+        gsn = work['gsn']
+        gsn_def = resources_defsmeta[gsn]
+        new_vedom[-1].append(name_task_vedom)
+        new_vedom[-1].append(work['units_measurement'])
+        new_vedom[-1].append(work['volume'])
+        new_vedom[-1].append(gsn)
+        for res_name in gsn_def:
+            if res_name['type'] == 'material':
+                new_vedom.append([None, None, None, None])
+                new_vedom[-1].append(res_name['name'])
+                new_vedom[-1].append(res_name['unit'])
+                new_vedom[-1].append(res_name['consumption'])
+                new_vedom[-1].append(res_name['consumption'] * task_vedom[name_task_vedom]['volume'])
+                if summ_vedom.get(res_name['name']) is None:
+                    summ_vedom[res_name['name']] = res_name['consumption'] * task_vedom[name_task_vedom]['volume']
+                else:
+                    summ_vedom[res_name['name']] += res_name['consumption'] * task_vedom[name_task_vedom]['volume']
 
     wb = Workbook()
-    ws1 = wb.create_sheet("Материалы")
+    ws1 = wb.create_sheet("Ведомость ресурсов")
     for row in new_vedom:
         ws1.append(row)
-    wb.save('Материалы.xlsx')
 
-    project.close()
+    ws1 = wb.create_sheet("Сводная таблица")
+    for row in [[k, v] for k, v in summ_vedom.items()]:
+        ws1.append(row)
+
+    del wb['Sheet']
+    wb.save('Материалы.xlsx')
+    #os.startfile('Материалы.xlsx')
 
 
 if __name__ == '__main__':
