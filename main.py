@@ -132,7 +132,6 @@ from openpyxl import Workbook
 
 
 def main():
-    project = MSProject(glob.glob(os.path.join(DIRECTORY, '*.mpp'))[0])
     vedom = parce_vedom()[:]
 
     count_vedom = len(vedom)
@@ -143,6 +142,7 @@ def main():
 
     resources_defsmeta = parce_defsmeta(set(gsns))
 
+    project = MSProject(glob.glob(os.path.join(DIRECTORY, '*.mpp'))[0])
     # Добавление всех ресурсов в проект
     set_resources = set()
     for lst in resources_defsmeta.values():
@@ -203,7 +203,6 @@ def main():
 
     for ind, task_vedom in enumerate(vedom, start=1):
         new_vedom.append([])
-        print(f'{ind}/{count_vedom}')
         name_task_vedom = list(task_vedom.keys())[0].strip()
         work = task_vedom[name_task_vedom]
         gsn = work['gsn']
@@ -220,9 +219,12 @@ def main():
                 new_vedom[-1].append(res_name['consumption'])
                 new_vedom[-1].append(res_name['consumption'] * task_vedom[name_task_vedom]['volume'])
                 if summ_vedom.get(res_name['name']) is None:
-                    summ_vedom[res_name['name']] = res_name['consumption'] * task_vedom[name_task_vedom]['volume']
+                    summ_vedom[res_name['name']] = {
+                        'unit':res_name['unit'],
+                        'summa':res_name['consumption'] * task_vedom[name_task_vedom]['volume']
+                    }
                 else:
-                    summ_vedom[res_name['name']] += res_name['consumption'] * task_vedom[name_task_vedom]['volume']
+                    summ_vedom[res_name['name']]['summa'] += res_name['consumption'] * task_vedom[name_task_vedom]['volume']
 
     wb = Workbook()
     ws1 = wb.create_sheet("Ведомость ресурсов")
@@ -230,7 +232,7 @@ def main():
         ws1.append(row)
 
     ws1 = wb.create_sheet("Сводная таблица")
-    for row in [[k, v] for k, v in summ_vedom.items()]:
+    for row in [[k, v['unit'], v['summa']] for k, v in summ_vedom.items()]:
         ws1.append(row)
 
     del wb['Sheet']
